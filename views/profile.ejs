@@ -1,0 +1,79 @@
+<!doctype html>
+<html>
+<head>
+    <title>Welcome to Parky</title>
+    <link rel="stylesheet" href="//netdna.bootstrapcdn.com/bootstrap/3.0.2/css/bootstrap.min.css">
+    <link rel="stylesheet" href="//netdna.bootstrapcdn.com/font-awesome/4.0.3/css/font-awesome.min.css">
+    <style>
+        body         { padding-top:80px; word-wrap:break-word; }
+    </style>
+</head>
+<body>
+    <% if (global.message) { %>
+        <div class="alert alert-danger"><%= message %></div>
+    <% } %>
+
+<div class="container">
+
+    <div class="page-header text-center">
+        <h1><span class="fa fa-anchor"></span> Profile Page</h1>
+        <a href="/logout" class="btn btn-default btn-sm">Logout</a>
+    </div>
+	
+
+
+    <div class="row">
+
+        <!-- LOCAL INFORMATION -->
+        <div class="col-sm-6">
+            <div class="well">
+				<% if (user.username) { %>
+                <h3><span class="fa fa-user"></span> Hello <%= user.username %><br></h3>
+				<% } else{ %>
+				<h3><span class="fa fa-user"></span> Hello User</h3>
+				<% } %>
+				
+                <% if (user.Name) { %>
+                    <p>
+                        <strong>Name</strong>: <%= user.Name %><br>
+                        <strong>email</strong>: <%= user.email %><br>
+						<strong>score</strong>: <%= user.Score %><br>
+						<strong>rank</strong>: <%= user.Rank %><br>
+						<strong>false parking</strong>: <%= user.NumberOfFalseParkingForToday %><br>
+						
+						<% if (user.Location!=null) { %>
+                        <strong>Location</strong>: <%= user.Location.Lat %>,<%= user.Location.Long %><br>
+						<% } %>
+                    </p>
+                <% } %>
+				
+
+
+            </div>
+        </div>
+		
+		<!-- LOCAL INFORMATION -->
+        <div class="col-sm-6">
+            <div class="well">
+				<!-- LOGIN FORM -->
+				<form action="/getParkingList" method="post">
+					<div class="form-group">
+						<label>New Lat</label>
+						<input type="text" class="form-control" name="Lat">
+					</div>
+					<div class="form-group">
+						<label>NewL ong</label>
+						<input type="text" class="form-control" name="Long">
+					</div>
+
+					<button type="submit" class="btn btn-warning btn-lg">send</button>
+				</form>			
+            </div>
+        </div>
+	</div>
+	
+	<a href="/getParkingList" > find parkings! </a>
+
+</div>
+</body>
+</html>

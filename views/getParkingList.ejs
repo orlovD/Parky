@@ -1,0 +1,676 @@
+
+<!doctype html>
+<html>
+<head>
+<script src="jquery-1.12.0.min.js"></script>
+<script src="jquery-ui.min.js"></script>
+    <title>Welcome to Parky</title>
+    <link rel="stylesheet" href="//netdna.bootstrapcdn.com/bootstrap/3.0.2/css/bootstrap.min.css">
+    <link rel="stylesheet" href="//netdna.bootstrapcdn.com/font-awesome/4.0.3/css/font-awesome.min.css">
+	<link rel="stylesheet" href="https://code.jquery.com/ui/1.11.1/themes/smoothness/jquery-ui.css" />
+    <style>
+		body, html {
+			height: 100%;
+			width: 100%;
+		}
+		.logo1 {position: absolute; bottom: 0px; left: 0px; text-align:left; float:left; z-index:2;}
+		.user-icon {position: absolute; top: 0px; right: 0px; text-align:right; float:right; z-index:2;}
+		.screen-icon {position: absolute; top: 0px; right: 60px; text-align:right; float:right; z-index:2;}
+		.gps-icon {position: absolute; top: 0px; right: 120px; text-align:right; float:right; z-index:2;}
+		#googleMap { height:100%; width:100%; position: absolute; top: 0; left: 0; z-index:1;}
+    </style>
+<script src="http://maps.googleapis.com/maps/api/js"></script>
+
+<script type="text/javascript">
+jQuery(document).ready(function () {
+	jQuery("#dialog").dialog({ autoOpen: false, modal: true});
+	jQuery("#user_dialog").dialog({ autoOpen: false, modal: false, title: "Hello <%= user.username %>", position: 'right top', resizable: false,closeOnEscape: true, draggable: false,});
+});
+</script>
+
+<script>
+var initialCenter = new google.maps.LatLng(32.07,34.77);
+var initialZoom = 13;
+var info_window_autoclose_after = 5000;
+var timeout_5sc = 5000;
+var timeout_3sc = 3000;
+var timeout_1sc = 1000;
+var info_window_timer = null;
+var map;
+var marker;
+var parkings =[];
+var markers = [];
+var debugMode = true;
+var infowindow;
+var chosenParking=null;
+var lookingOnParking = null;
+var lookingOnMarker = null;
+var chosenMarker = null;
+var arraivalChecked = false;
+var fullscreen_flag = false;
+var user_id = <%= user.id %>;
+
+
+
+function initialize()
+{
+	var mapProp = {
+	  center:initialCenter,
+	  zoom:initialZoom,
+	  mapTypeId:google.maps.MapTypeId.ROADMAP
+	};
+
+  map = new google.maps.Map(document.getElementById("googleMap"),mapProp);
+
+  google.maps.event.addListener(map, 'click', function(event) {
+	//clearMarkers();
+	//markers=[];
+	initialCenter = event.latLng;
+	initialZoom = 17;
+	map.setZoom(17);
+	map.setCenter(event.latLng);
+    placeMarker(event.latLng);
+	searchForParkings(event.latLng);
+  });
+  getLocation(function(pos){
+		initialCenter = pos;
+		initialZoom = 17;
+		map.setZoom(17);
+		map.setCenter(pos);
+		placeMarker(pos);
+		searchForParkings(pos);
+  });
+  setInterval(function(){
+	  console.log();
+	  searchForParkings(initialCenter);
+  }  , 5000);
+  setInterval(function(){
+	  checkArraival();
+  }  , 20000);
+}
+
+//if callback!= null calls callback after timeout
+function openDialog(Title, Message, timeout_dialog, callback){	
+	closeInfoWindow();
+	closeUserDialog();
+	jQuery("#dialog").html(Message);
+	jQuery( "#dialog" ).dialog({
+		modal: true,		
+		title: Title,
+		resizable: false,
+		draggable: false,
+		width: 300,
+		height: 'auto',
+		buttons: {}
+	});
+	jQuery("#dialog").dialog('open');
+	if(timeout_dialog > 0)
+		setTimeout(	function () {
+			jQuery("#dialog").dialog("close");
+			if(callback!= null)
+				callback();
+		}, timeout_dialog);
+	else if(callback!= null)
+		callback();
+}
+
+function closeDialog(){
+	jQuery("#dialog").dialog('close');
+}
+
+function closeInfoWindow(){
+	if (infowindow) {
+		clearTimeout(info_window_timer);
+		infowindow.close();
+	}
+}
+
+function openUserDialog(){
+	closeInfoWindow();
+	closeDialog();
+	jQuery("#user_dialog").dialog('open');
+}
+
+function closeUserDialog(){
+	jQuery("#user_dialog").dialog('close');
+}
+
+// open a confirm box, with the following parameters. after clicking yes/no callback is called with t/f accordingly.
+// Timeout options: timeout_dialog = 0 doesn't timeout. timeoutOption - choose what to do on timeout- "true", "false" or "none"(just close the window)
+function openConfirmDialog(Title, Question, YesMessage, NoMessage, timeout_dialog, timeoutOption, callback){	
+	closeInfoWindow();
+	closeUserDialog();
+	jQuery("#dialog").html(Question);
+	jQuery( "#dialog" ).dialog({
+		modal: true,		
+		title: Title,
+		resizable: false,
+		draggable: false,
+		width: 300,
+		height: 'auto',
+		buttons: {
+			"Yes":{
+				text:YesMessage,
+				className:'save',
+				click: function() {
+					  $( this ).dialog( "close" );
+					  callback(true);
+					}
+			},
+			"No":{
+				text:NoMessage,
+				className:'btn btn-warning',
+				click: function() {
+					  $( this ).dialog( "close" );
+					  callback(false);
+					}
+			}
+      }
+	});
+	jQuery("#dialog").dialog('open');
+	if(timeout_dialog > 0){
+		setTimeout(	function () {
+			jQuery("#dialog").dialog("close");
+			if(timeoutOption != "none"){
+				if(timeoutOption != "true")
+					callback(true);
+				else if(timeoutOption != "false")
+					callback(false);
+			}
+		}, timeout_dialog);
+	}
+}
+
+function placeMarker(location) {
+	if(marker == null){
+		var image = 'car.png';
+		marker = new google.maps.Marker({
+			position: location,
+			map: map,
+			icon: image
+		});
+	}else {
+		marker.setPosition(location);
+	}
+	chosenParking = null;
+}
+
+function GetEstablishedTimeInMinutes(parking_established_time){
+	var current_time = new Date().getTime();
+	return Math.floor((current_time - parking_established_time) / (1000*60))
+}
+
+//returns number from 0 to 7 of the time (0 -fresh, 7-old)
+function GetFresshness(parking_established_time){
+	var minutes_from_now = GetEstablishedTimeInMinutes(parking_established_time);
+	return Math.floor(minutes_from_now / 15)
+}
+
+function getImage(parking_established_time){
+	var freshness = GetFresshness(parking_established_time);
+	var add = "http://www.googlemapsmarkers.com/v1/P/"
+	var color;
+	switch(freshness){
+		case 0:
+			color = "f7faa3"
+			break;
+		case 1:
+			color = "f6ff00"
+			break;
+		case 2:
+			color = "fdd900"
+			break;
+		case 3:
+			color = "ff8c00"
+			break;
+		case 4:
+			color = "ff7d00"
+			break;
+		case 5:
+			color = "ff3800"
+			break;
+		case 6:
+			color = "ff0000"
+			break;
+		case 7:
+			color = "ff0000"
+			break;
+	}
+	add += color;
+	return add;
+}
+
+
+
+function showParking(parkingList, recommanded){
+	
+	var parkingTaken = false;
+	if(chosenParking !=null){
+		parkingTaken = true;
+	}
+	
+	var curParkings = parkings;
+	var curIndex = 0;
+	var newMarkers = [];
+	var freshness;
+	var markerSrc;
+
+
+	for(var i=0; i<parkingList.length; i=i+1){
+		markerSrc = getImage(parkingList[i].TimeEstablished);
+		
+		if(chosenParking && chosenParking.id == parkingList[i].id){
+			parkingTaken = false;
+		}
+		
+		while(curIndex < curParkings.length && curParkings[curIndex].id <parkingList[i].id){
+			markers[curIndex].setMap(null);
+			curIndex ++;
+		}
+		
+		if(curIndex < curParkings.length && curParkings[curIndex].id == parkingList[i].id){
+			newMarkers.push(markers[curIndex]);
+			addMarkerListener(newMarkers[newMarkers.length -1], parkingList[i]);
+			if(recommanded == i){
+				newMarkers[newMarkers.length -1].setAnimation(google.maps.Animation.BOUNCE);
+			} else {
+				newMarkers[newMarkers.length -1].setAnimation(null);
+			}
+			curIndex++;
+			continue;
+		}
+
+	  //alert(parkingList[i].id);
+		newMarkers.push(null);
+		var index = newMarkers.length - 1;
+		
+		if(recommanded == i){
+			newMarkers[index] = new google.maps.Marker({
+				position: new google.maps.LatLng(parkingList[i].Location.Lat, parkingList[i].Location.Long),
+				animation:google.maps.Animation.BOUNCE,
+				map: map,
+				icon: markerSrc
+			});
+			addMarkerListener(newMarkers[index], parkingList[i]);
+		}else{
+			newMarkers[index] = new google.maps.Marker({
+				position: new google.maps.LatLng(parkingList[i].Location.Lat, parkingList[i].Location.Long),
+				map: map,
+				icon: markerSrc
+			});
+			addMarkerListener(newMarkers[index], parkingList[i]);	
+		}
+		
+	}
+ 	while(curIndex < curParkings.length){
+			markers[curIndex].setMap(null);
+			curIndex ++;
+	}
+ 
+	if(parkingTaken){
+		openDialog("Parking was Taken", "Your chosen parking is not free anymore!\nPlease choose new parking", timeout_3sc, function(){
+			chosenParking = null;
+			document.getElementById("userParking").innerHTML = '';
+		});
+	}
+	markers = newMarkers;
+	parkings = parkingList;
+}
+
+function addMarkerListener(markerToAdd, parking){	
+	markerToAdd.addListener('click', function(e) {	
+		openData(markerToAdd, parking);
+	});
+}
+
+function openData(markerToAdd,parking){
+	closeInfoWindow();
+	lookingOnMarker = markerToAdd;
+	infowindow = new google.maps.InfoWindow({
+		content: "Number of users on the way: " + parking.UsersOnTheWay
+	});
+	lookingOnParking = parking;
+	infowindow.setContent("<p>Number of users on the way: " +parking.UsersOnTheWay+"</p>" + 
+	"<p>Distance: " +parking.dist +" meters</p>" +
+    "<p>" + "Parking ID: " + parking.id+"</p>"+
+    "<p>" + "Created Before: " + GetEstablishedTimeInMinutes(parking.TimeEstablished) +" minutes</p>"+'<button onclick="chooseParking()">Choose</button>');
+	
+	infowindow.open(map,markerToAdd);
+	//autoclose
+	info_window_timer = setInterval(function(){
+		if (infowindow) {
+			infowindow.close();
+		}
+	}  , info_window_autoclose_after);
+}
+
+
+function Parking(id, numberOfUsersHaded, location){
+	this.id = id;
+	this.numberOfUsersHaded=numberOfUsersHaded;
+	this.location = location;
+}
+
+function launchIntoFullscreen(element) {
+  if(element.requestFullscreen) {
+    element.requestFullscreen();
+  } else if(element.mozRequestFullScreen) {
+    element.mozRequestFullScreen();
+  } else if(element.webkitRequestFullscreen) {
+    element.webkitRequestFullscreen();
+  } else if(element.msRequestFullscreen) {
+    element.msRequestFullscreen();
+  }
+}
+
+// Whack fullscreen
+function exitFullscreen() {
+  if(document.exitFullscreen) {
+    document.exitFullscreen();
+  } else if(document.mozCancelFullScreen) {
+    document.mozCancelFullScreen();
+  } else if(document.webkitExitFullscreen) {
+    document.webkitExitFullscreen();
+  }
+}
+
+function toggleFullScreen(){
+	if(fullscreen_flag){
+		// full screen was on - minimize
+		exitFullscreen();
+		jQuery(".screen-icon").attr("src","fullscreen.png");
+		fullscreen_flag = false;
+	}
+	else{
+		launchIntoFullscreen(document.documentElement); // the whole page	
+		jQuery(".screen-icon").attr("src","smallscreen.png");
+		fullscreen_flag = true;
+	}
+}
+
+
+
+
+
+function searchForParkings(location){
+	if(marker == undefined)
+		return;
+	var lat = marker.getPosition().lat();
+	var lng = marker.getPosition().lng();
+	var params = "Lat="+lat+"&"+"Long="+lng;
+	if(chosenParking)
+		params += "&chosen_id="+chosenParking.id;
+
+	$.post( "/getParkingList",params,  function( data ) {
+		data = getData(data);
+		//alert(JSON.stringify(data));
+
+		var list = data.list;
+		var recommanded = data.recommanded_index;
+
+		var recId = list[recommanded];
+		list.sort(function(a, b) { 
+			return a.id - b.id;
+		})
+		for(var i = 0; i< list.length; i++){
+			if (recId == list[i].id){
+				recommanded = i;
+				break;
+			}
+		}
+		showParking(list,recommanded);
+	});
+}
+
+function getLocation2(success_callback, error_callback){
+	if (navigator.geolocation) {
+		navigator.geolocation.getCurrentPosition(
+			function(position) {
+				console.log("good response");
+				var l1 = position.coords.latitude;
+				var l2 = position.coords.longitude;
+				var pos =  new google.maps.LatLng(l1,l2);
+				success_callback(pos);
+			}, 
+			function(error) {
+				console.log("bad response1");
+				error_callback(error)
+			}
+		);
+	} else {
+		console.log("bad response2");
+		var error = "No GPS sign Please enable location in order to use the application";
+		error_callback(error);
+	}
+}
+
+function getData2(data, callback){
+  if(data.message != "" && data.message != null){
+	openDialog("Parky Says:", data.message, timeout_3sc, function(){
+		callback(false, null);
+	});
+  }
+  else{
+	callback(true, data.object);  
+  }
+}
+
+function addParking(){
+	closeUserDialog();
+	getLocation2(function(pos){
+		console.log("1");
+		var lat = pos.lat();
+		var lng = pos.lng();
+		var loc = "Lat="+lat+"&"+"Long="+lng;
+
+		$.post( "/addParking",loc,  function( data ) {
+			console.log("2");
+			getData2(data, function(message_printed, returned_data){
+				if( ! message_printed)
+					openDialog("Parking added", "thank you", timeout_1sc, null);
+			});
+		});
+	}, function(error){
+		openDialog("GPS error", error, timeout_3sc, null);
+	});
+
+}
+
+
+
+function sendUpdate(parking, taken, response){
+
+  var params = "parking_id=" + parking.id+"&isOccupied="+taken;
+	$.post( "/updateParkingStatus", params,  function( data ) {
+		getData2(data, function(printMessage, data){
+			if(data.score != 0){
+				openDialog("Thanks!", "You got more " + data.score + " points.", timeout_3sc, function(){
+					window.location = "/";
+				});
+			}
+			else{
+				window.location = "/";
+			}
+		});
+		// data = getData(data);
+		// openDialog("Thanks!", "You got more " + data.score + " points.", timeout_3sc, function(){
+			// window.location = "/";
+		// });
+	});
+}
+
+function checkArraival(){
+	if(arraivalChecked || chosenParking == null)
+		return;
+	getLocation(function(pos){
+		if(Math.abs(pos.lat() - chosenParking.Location.Lat) > 0.0002 || Math.abs(pos.lng() - chosenParking.Location.Long) > 0.0002){
+			return;
+		} 
+		else {
+			arraivalChecked = true;
+			openConfirmDialog("You are close to the location", "Have you arrived?", "Yes", "No", 0, "none", function(boolDidArrived){
+				if(boolDidArrived){
+					var arrivedTo = chosenParking;
+					chosenParking = null;
+					openConfirmDialog("Parking", "Is the parking already occupied?", "Yes", "No", 0, "none", function(isParkOccupied){
+						sendUpdate(arrivedTo, isParkOccupied, function(score){
+							if(isParkOccupied){
+								chosenParking = null;
+								openDialog("Sorry :(", "you got " + score + " points!\nPlease choose new parking", timeout_3sc, null);
+							}
+							else{
+								openDialog("Thanks!", "you got " + score + " points!", timeout_3sc, function(){
+									window.location = "profile.html";
+								});
+							}
+						});
+					});
+				}
+			});
+		}
+	});
+}
+
+function arrived(){
+	var arrivedTo = chosenParking;
+	chosenParking = null;
+	getLocation(function(pos){
+		if(Math.abs(pos.lat() - arrivedTo.Location.Lat) > 0.0002 || Math.abs(pos.lng() - arrivedTo.Location.Long) > 0.0002){
+			openDialog("Error: Location is not nearby","You need to be near to parking lot in order to report arrival", timeout_3sc, null);
+			chosenParking = arrivedTo;
+			return;
+		} 
+		else {
+			openConfirmDialog("Parking", "Is the parking already occupied?", "Yes", "No", 0, "none", function(isParkOccupied){
+				sendUpdate(arrivedTo, isParkOccupied, function(score){
+					if(isParkOccupied){
+						openDialog("Sorry :(", "you got " + score + " points!\nPlease choose new parking", timeout_3sc, function(){
+							chosenParking = null;
+						});
+					}
+					else{
+						openDialog("Thanks!", "you got " + score + " points!", timeout_3sc, function(){
+							window.location = "profile.html";
+						});
+					}
+				});
+			});
+		}
+	});
+}
+
+function cancelParking(){
+	var params = "parking_id=" + chosenParking.id;
+
+	$.post( "/cancelPark",params,  function( data ) {});
+	if(chosenMarker){
+		chosenMarker.setAnimation(null);
+	}
+	chosenMarker = null;
+	chosenParking = null;
+	document.getElementById("userParking").innerHTML = "";
+}
+
+function chooseParking(){
+	closeInfoWindow();
+	if( lookingOnParking.CreatingUser == user_id){
+		openDialog("Illegal Parking!", "You cannot use parking you created", timeout_3sc, null);
+	}
+	else{
+		if(chosenMarker){
+			chosenMarker.setAnimation(null);
+      if(chosenParking)
+        chosenMarker.setIcon(getImage(chosenParking.TimeEstablished));
+      else
+        chosenMarker.setIcon("http://www.googlemapsmarkers.com/v1/P/fdd900");
+		}
+		chosenMarker = lookingOnMarker;
+		chosenMarker.setIcon("http://www.googlemapsmarkers.com/v1/C/ffffff");
+		chosenParking = lookingOnParking;
+		var lat = chosenParking.Location.Lat;
+		var lng = chosenParking.Location.Long;
+		var params = "Lat="+lat+"&"+"Long="+lng + "&parking_id=" + chosenParking.id;
+
+		$.post( "/chooseParking",params,  function( data ) {
+			data = getData(data);
+		});
+		document.getElementById("userParking").innerHTML = 'You are currently on the way to parking ID ' + chosenParking.id +
+			'<br><button onclick="arrived()" class="btn btn-warning btn-lg">Arrived!</button>' +
+			'<button onclick="cancelParking()" class="btn btn-warning btn-lg">Cancel</button>';
+	}
+
+}
+
+// Sets the map on all markers in the array.
+function setMapOnAll(map) {
+  for (var i = 0; i < markers.length; i++) {
+    markers[i].setMap(map);
+  }
+}
+
+// Removes the markers from the map, but keeps them in the array.
+function clearMarkers() {
+  setMapOnAll(null);
+}
+
+function getLocation(response){
+ if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(function(position) {
+		var l1 = position.coords.latitude;
+		var l2 = position.coords.longitude;
+		var pos =  new google.maps.LatLng(l1,l2);
+		jQuery(".gps-icon").attr("src","gps-fixed-60.png");
+		response(pos);
+    }, function(e) {
+		jQuery(".gps-icon").attr("src","no-gps-60.png");
+    });
+  } else {
+	  jQuery(".gps-icon").attr("src","no-gps-60.png");
+  }
+}
+
+
+function getData(data){
+  if(data.message != "" && data.message != null){
+	openDialog("Update", data.message, timeout_3sc, null);
+  }
+  return data.object;
+}
+
+google.maps.event.addDomListener(window, 'load', initialize);
+
+</script>
+<body>
+	<h1 class="logo1"><img src="logo.bmp"/></h1> 
+	<img class="user-icon" src="user-icon.png" onClick="openUserDialog()" />
+	<img class="gps-icon" src="no-gps-60.png"/>
+	<img class="screen-icon" src="fullscreen.png"/ onClick="toggleFullScreen()">
+	
+	<div id="googleMap" ></div>	
+	
+	<!-- LOCAL INFORMATION -->
+	<div class="well" id="user_dialog">				
+			<% if (user.Name) { %>
+				<p>
+					<strong>score</strong>: <%= user.Score %><br>
+					<strong>rank</strong>: <%= user.Rank %><br>
+					<% if (user.Location!=null) { %>
+						<strong>Location</strong>: <%= user.Location.Lat %>,<%= user.Location.Long %><br>
+					<% } %></br>
+					<button onclick="addParking()" class="btn btn-warning btn-lg">Add Parking</button>
+					<a href="/logout" class="btn btn-danger btn-lg">Logout</a>
+					<div id="userParking"></div>
+				</p>
+			<% } %>
+	</div>
+	
+	<div id="dialog" title="My Dialog Title">
+    <p>This is My Dialog box Description/Content</p>   
+    <p>This is the default dialog which is useful for displaying information. The dialog window can be moved, resized and closed with the 'x' icon.</p>
+	</div>
+	
+
+
+
+</body>
+</html>
